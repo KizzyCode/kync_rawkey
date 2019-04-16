@@ -119,33 +119,3 @@ impl error_t {
 		Self::set(b"EOTHER", errno)
 	}
 }
-#[test]
-fn bindgen_test_layout_error_t() {
-	use std::{
-		ptr::null,
-		mem::{ align_of, size_of }
-	};
-	
-	assert_eq!(size_of::<error_t>(), 40usize, concat!("Size of: ", stringify!(error_t)));
-	assert_eq!(align_of::<error_t>(), 8usize, concat!("Alignment of ", stringify!(error_t)));
-	assert_eq!(
-		unsafe { &(*(null::<error_t>())).error_type as *const _ as usize }, 0usize,
-		concat!("Offset of field: ", stringify!(error_t), "::", stringify!(error_type))
-	);
-	assert_eq!(
-		unsafe { &(*(null::<error_t>())).error_type_len as *const _ as usize }, 8usize,
-		concat!("Offset of field: ", stringify!(error_t), "::", stringify!(error_type_len))
-	);
-	assert_eq!(
-		unsafe { &(*(null::<error_t>())).description as *const _ as usize }, 16usize,
-		concat!("Offset of field: ", stringify!(error_t), "::", stringify!(description))
-	);
-	assert_eq!(
-		unsafe { &(*(null::<error_t>())).description_len as *const _ as usize }, 24usize,
-		concat!("Offset of field: ", stringify!(error_t), "::", stringify!(description_len))
-	);
-	assert_eq!(
-		unsafe { &(*(null::<error_t>())).info as *const _ as usize }, 32usize,
-		concat!("Offset of field: ", stringify!(error_t), "::", stringify!(info))
-	);
-}
