@@ -13,5 +13,10 @@ install:
 build: false
 
 test_script:
- - cargo build && cargo test --verbose
- - cargo build --release && cargo test --verbose --release
+ - cargo build
+ - cargo test --verbose
+ - cargo clean
+
+ - cargo build --release
+ - cargo test --verbose --release
+ - cargo clean
