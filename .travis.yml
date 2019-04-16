@@ -11,10 +11,10 @@ compiler:
   - clang
 
 script:
-  - cargo build --features use-maproper-volatile
+  - cargo build --verbose --features use-maproper-volatile
   - cargo test --verbose --features use-maproper-volatile
   - cargo clean
 
-  - cargo build --release --features use-maproper-volatile
+  - cargo build --verbose --release --features use-maproper-volatile
   - cargo test --verbose --release --features use-maproper-volatile
   - cargo clean
