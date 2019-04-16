@@ -1,0 +1,47 @@
+[package]
+name = "kync_rawkey"
+edition = "2018"
+version = "0.1.0"
+authors = ["KizzyCode <development@kizzycode.de>"]
+description = "A raw key plugin for KyNc"
+categories = ["cryptography"]
+keywords = ["kync", "cryptography", "key-wrapping", "key-encapsulation"]
+license = "BSD-2-Clause OR MIT"
+repository = "https://github.com/KizzyCode/kync_rawkey"
+readme = "README.md"
+
+[badges]
+travis-ci = { repository = "KizzyCode/kync_rawkey" }
+appveyor = { repository = "KizzyCode/kync_rawkey" }
+maintenance = { status = "passively-maintained" }
+is-it-maintained-open-issues = { repository = "KizzyCode/kync_rawkey" }
+is-it-maintained-issue-resolution = { repository = "KizzyCode/kync_rawkey" }
+
+
+[lib]
+name = "kync_rawkey"
+crate-type = ["dylib"]
+
+
+[dependencies]
+crypto_api_osrandom = "0.1.5"
+crypto_api_blake2 = "0.1.3"
+crypto_api_chachapoly = "0.1.8"
+ma_proper = { version = "0.1.4", optional = true }
+
+
+[dev-dependencies]
+kync = "0.1.8"
+
+
+[features]
+default = ["use-maproper"]
+use-maproper = ["ma_proper"]
+use-maproper-volatile = ["ma_proper/volatile_fallback"]
+
+
+[profile.release]
+overflow-checks = true
+
+[profile.bench]
+overflow-checks = true
