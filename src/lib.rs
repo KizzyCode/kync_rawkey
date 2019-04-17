@@ -28,6 +28,12 @@ use std::{
 };
 
 
+// Use MAProper if the feature is enabled
+#[cfg(any(feature = "use-maproper", feature = "use-maproper-volatile"))]
+#[global_allocator]
+static MA_PROPER: ma_proper::MAProper = ma_proper::MAProper;
+
+
 // Constants and global log level
 const API_VERSION: u8 = 1;
 const UID: &[u8] = b"de.KizzyCode.RawKey.7ABD7A67-49EC-46B6-B881-1B6FD7E03E01";
