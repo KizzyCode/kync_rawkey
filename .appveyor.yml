@@ -2,17 +2,23 @@ environment:
   CARGO_FLAGS: "--verbose"
 
   matrix:
-  - TARGET: x86_64-pc-windows-msvc
-  - TARGET: i686-pc-windows-msvc
+    - TARGET: x86_64-pc-windows-msvc
+    - TARGET: i686-pc-windows-msvc
 
 install:
- - appveyor DownloadFile https://win.rustup.rs/ -FileName rustup-init.exe
- - rustup-init.exe -y --default-host %TARGET%
- - set PATH=%PATH%;C:\Users\appveyor\.cargo\bin
- - rustc -V
- - cargo -V
+  - appveyor DownloadFile https://win.rustup.rs/ -FileName rustup-init.exe
+  - rustup-init.exe -y --default-host %TARGET%
+  - set PATH=%PATH%;C:\Users\appveyor\.cargo\bin
+  - rustc -V
+  - cargo -V
 
 build: false
 
 test_script:
- - make check
+  - cargo build --verbose
+  - cargo test --verbose
+  - cargo clean
+
+  - cargo build --verbose --release
+  - cargo test --verbose --release
+  - cargo clean
