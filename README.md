@@ -49,7 +49,7 @@ salt[16] || nonce[12] || chacha_ciphertext* || poly_tag[16]
 
 
 ## Build
-Prerequisites: A working [Rust toolchain](https://rust-lang.org) `>= 1.34`;
+Prerequisites: A working [Rust toolchain](https://rust-lang.org) `>= 1.34` and `make`.
 
-To build the library, use `cargo build --release` in the project root directory (where the
-`Cargo.toml` file is). You will find the compiled plugin as dynamic library in `target/release`.
+To build, test and install the library, use `make`, `make check` and `make install` respectively. To
+add additional `cargo`-flags, use the `CARGO_FLAGS` environment variable for your `make` invocation.

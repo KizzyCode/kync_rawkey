@@ -13,10 +13,4 @@ install:
 build: false
 
 test_script:
- - cargo build --verbose
- - cargo test --verbose
- - cargo clean
-
- - cargo build --verbose --release
- - cargo test --verbose --release
- - cargo clean
+ - CARGO_FLAGS="--verbose" make test

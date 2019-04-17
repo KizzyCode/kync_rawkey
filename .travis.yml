@@ -11,10 +11,4 @@ compiler:
   - clang
 
 script:
-  - cargo build --verbose --features use-maproper-volatile
-  - cargo test --verbose --features use-maproper-volatile
-  - cargo clean
-
-  - cargo build --verbose --release --features use-maproper-volatile
-  - cargo test --verbose --release --features use-maproper-volatile
-  - cargo clean
+  - CARGO_FLAGS="--verbose --features=use-maproper-volatile" make test
