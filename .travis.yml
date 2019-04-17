@@ -11,4 +11,4 @@ compiler:
   - clang
 
 script:
-  - CARGO_FLAGS="--verbose --features=use-maproper-volatile" make test
+  - CARGO_FLAGS="--verbose --features=use-maproper-volatile" make check

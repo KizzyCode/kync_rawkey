@@ -1,4 +1,6 @@
 environment:
+  CARGO_FLAGS: "--verbose"
+
   matrix:
   - TARGET: x86_64-pc-windows-msvc
   - TARGET: i686-pc-windows-msvc
@@ -13,4 +15,4 @@ install:
 build: false
 
 test_script:
- - CARGO_FLAGS="--verbose" make test
+ - make check
