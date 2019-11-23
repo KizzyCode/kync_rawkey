@@ -2,50 +2,23 @@ use kync::{
 	Plugin,
 	plugin::{ os_default_prefix, os_default_suffix }
 };
-use std::{ u128, error::Error, path::PathBuf };
+use std::{ u128, path::PathBuf };
 use crypto_api_osrandom::OsRandom;
 
 
-/// A helper trait to extend our Argon2 plugin
-trait RawkeyPluginExt {
-	/// Loads the `rawkey` plugin
-	fn rawkey_load() -> Self;
+const CONFIG: &[u8] = b"Blake2b-ChaChaPolyIETF";
+
+
+/// Loads the `rawkey` plugin
+fn load_plugin() -> Plugin {
+	// Create path
+	let mut path = PathBuf::new();
+	path.push("target");
+	path.push(if cfg!(debug_assertions) { "debug" } else { "release" });
+	path.push(format!("{}kync_rawkey.{}", os_default_prefix(), os_default_suffix()));
 	
-	/// Seals `key` using `preset` and `password`
-	fn rawkey_seal(&self, key: &[u8], user_secret: &[u8])
-		-> Result<Vec<u8>, Box<dyn Error + 'static>>;
-	/// Opens `capsule` using `password`
-	fn rawkey_open(&self, capsule: &[u8], user_secret: &[u8])
-		-> Result<Vec<u8>, Box<dyn Error + 'static>>;
-}
-impl RawkeyPluginExt for Plugin {
-	fn rawkey_load() -> Self {
-		// Create path
-		let mut path = PathBuf::new();
-		path.push("target");
-		path.push(if cfg!(debug_assertions) { "debug" } else { "release" });
-		path.push(format!("{}kync_rawkey.{}", os_default_prefix(), os_default_suffix()));
-		
-		// Load plugin
-		Plugin::load(path).unwrap()
-	}
-	fn rawkey_seal(&self, key: &[u8], user_secret: &[u8])
-		-> Result<Vec<u8>, Box<dyn Error + 'static>>
-	{
-		let mut buf = vec![0; self.seal_buf_len(key.len())];
-		let buf_len =
-			self.seal(&mut buf, key, None, Some(user_secret))?;
-		buf.truncate(buf_len);
-		Ok(buf)
-	}
-	fn rawkey_open(&self, capsule: &[u8], user_secret: &[u8])
-		-> Result<Vec<u8>, Box<dyn Error + 'static>>
-	{
-		let mut buf = vec![0; self.open_buf_len(capsule.len())];
-		let buf_len = self.open(&mut buf, capsule, Some(user_secret))?;
-		buf.truncate(buf_len);
-		Ok(buf)
-	}
+	// Load plugin
+	Plugin::load(path).unwrap()
 }
 
 
@@ -90,19 +63,18 @@ impl RandomizedTestVector {
 	/// Run a randomized tests
 	pub fn test(&self, plugin: &Plugin) {
 		// Generate random password and key and select a random preset
-		let (key, password) =
-			(Random::vec(Random::len()), Random::vec(Random::len()));
+		let (secret, auth) = (Random::vec(Random::len()), Random::vec(Random::len()));
 		
 		// Seal the key
 		println!(
-			"*> Performing `seal->open`-test with a {} byte key and a {} byte password...",
-			key.len(), password.len()
+			"*> Performing `seal->open`-test with a {} byte secret and {} byte auth data...",
+			secret.len(), auth.len()
 		);
-		let capsule = plugin.rawkey_seal(&key, &password).unwrap();
+		let protected = plugin.protect(&secret, CONFIG, Some(&auth)).unwrap();
 		
 		// Open capsule and compare keys
-		let opened = plugin.rawkey_open(&capsule, &password).unwrap();
-		assert_eq!(key, opened)
+		let recovered = plugin.recover(&protected, Some(&auth)).unwrap();
+		assert_eq!(secret, recovered)
 	}
 }
 
@@ -110,8 +82,10 @@ impl RandomizedTestVector {
 /// Test a random batch
 #[test]
 fn test() {
-	let plugin = Plugin::rawkey_load();
-	for _ in 0..64 { RandomizedTestVector.test(&plugin) }
+	let plugin = load_plugin();
+	for _ in 0..64 {
+		RandomizedTestVector.test(&plugin)
+	}
 }
 
 
@@ -122,7 +96,7 @@ fn test_predefined() {
 	const USER_SECRET: &[u8] = b"oGKqY-Yx8wR-HFCMv-Y9Smh-N6oZb-p7ekX-tY3c5-ExCSY-vCG6c";
 	const CAPSULE: &[u8] = b"\x14\x2e\x97\xb3\xaf\x8a\x4a\x10\x64\xaa\x67\x2b\x28\xce\x6d\x27\x39\x7e\x8e\x21\xf1\xef\x56\xa5\x61\x2c\xe2\xda\x1c\xc6\x6a\x92\x58\x7d\x12\x7f\xf1\xf5\xde\x71\xc3\x0e\x71\xbd\x7d\xd3\xed\xfb\x32\xb4\xc2\xb6\x2c";
 	
-	let plugin = Plugin::rawkey_load();
-	let key = plugin.rawkey_open(CAPSULE, USER_SECRET).unwrap();
+	let plugin = load_plugin();
+	let key = plugin.recover(CAPSULE, Some(USER_SECRET)).unwrap();
 	assert_eq!(key, KEY);
 }

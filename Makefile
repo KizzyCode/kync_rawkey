@@ -10,6 +10,10 @@ library:
 check: library
 	cargo test --release $(CARGO_FLAGS)
 
+debug:
+	cargo build $(CARGO_FLAGS)
+	cargo test $(CARGO_FLAGS)
+
 install: library
 	install -d $(PREFIX)/lib/kync_plugins
 	install -m 644 target/release/libkync_rawkey.$(DYLIB_EXT) $(PREFIX)/lib/kync_plugins/

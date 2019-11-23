@@ -1,30 +1,11 @@
-/// Ensures that `expr` is true
-macro_rules! ensure {
-    ($expr:expr) => ({
-    	if !$expr {
-    		if crate::LOG_LEVEL.load(::std::sync::atomic::Ordering::SeqCst) > 0 {
-    			eprintln!("Assertion failed @{}:{} (`{}`)", file!(), line!(), stringify!($expr))
-    		}
-    		::std::process::abort()
-    	}
-    });
-}
-/// Ensures that `$ptr` is not `NULL`
-macro_rules! not_null {
-    ($($ptr:expr),*) => ($( ensure!(!$ptr.is_null()); )*);
-}
+//mod misc;
+mod ffi;
+mod crypto;
 
-
-// Mods and includes
-mod misc;
-
-use crate::misc::{ SliceExt, MutSliceExt, ErrorExt, error_t };
-use crypto_api_osrandom::OsRandom;
-use crypto_api_blake2::Blake2b;
-use crypto_api_chachapoly::ChachaPolyIetf;
+use ffi::{ MutPtrExt, SliceTExt, WriteTExt, sys };
 use std::{
-	slice,
-	sync::atomic::{ Ordering, AtomicU8 }
+	ptr, os::raw::c_char,
+	sync::atomic::{ AtomicU8, Ordering::SeqCst }
 };
 
 
@@ -35,170 +16,181 @@ static MA_PROPER: ma_proper::MAProper = ma_proper::MAProper;
 
 
 // Constants and global log level
-const API_VERSION: u8 = 1;
-const UID: &[u8] = b"de.KizzyCode.RawKey.7ABD7A67-49EC-46B6-B881-1B6FD7E03E01";
-
-const SALT_LEN: usize = 16;
-const NONCE_LEN: usize = 12;
-const MAC_LEN: usize = 16;
-const OVERHEAD: usize = SALT_LEN + NONCE_LEN + MAC_LEN;
-
+const API: u16 = 0x01_00;
+const UID: &[u8] = b"de.KizzyCode.RawKey.2C24B914-C9E9-41B3-8033-6B0364BCBA2E";
+const CONFIG_BLAKE2B_CHACHAPOLY_IETF: &[u8] = b"Blake2b-ChaChaPolyIETF";
 static LOG_LEVEL: AtomicU8 = AtomicU8::new(0);
 
 
-/// Initializes the plugin and sets the `log_level`
-#[no_mangle]
-pub extern "C" fn init(api_version: *mut u8, log_level: u8) {
-	not_null!(api_version);
-	
-	LOG_LEVEL.store(log_level, Ordering::SeqCst);
-	unsafe{ *api_version = API_VERSION }
-}
-
-/// Computes the buffer size necessary for a call to `fn_name` which will process `input_len` bytes
-/// of input and writes the result to `buf_len`
-#[no_mangle]
-pub extern "C" fn buf_len(buf_len: *mut usize, fn_name: *const u8, fn_name_len: usize,
-	input_len: usize)
-{
-	not_null!(buf_len, fn_name);
-	
-	// Get the function name
-	let fn_name = unsafe{ slice::from_raw_parts(fn_name, fn_name_len) };
-	let len = match fn_name {
-		b"capsule_format_uid" => UID.len(),
-		b"crypto_item_ids" => 0,
-		b"seal" => input_len + OVERHEAD,
-		b"open" => input_len,
-		_ => 0
-	};
-	unsafe{ *buf_len = len }
-}
-
-/// Writes the plugin UID to `uid`
-#[no_mangle]
-pub extern "C" fn capsule_format_uid(uid: *mut u8, uid_written: *mut usize) {
-	not_null!(uid, uid_written);
-	
-	// Copy the UID
-	let uid = unsafe{ slice::from_raw_parts_mut(uid, UID.len()) };
-	uid.copy_from_slice(UID);
-	unsafe{ *uid_written = UID.len() }
-}
+const ERR_INVALID_API: *const c_char = b"Unsupported API version\0".as_ptr().cast();
+const ERR_INVALID_CONFIG: *const c_char = b"Invalid config\0".as_ptr().cast();
+const ERR_MISSING_AUTH: *const c_char = b"Missing required authentication data".as_ptr().cast();
 
 
-/// Writes all crypto item IDs as `\0`-terminated, concatenated UTF-8 strings to `_buf`
-#[no_mangle]
-pub extern "C" fn crypto_item_ids(_buf: *mut u8, _buf_written: *mut usize) -> *const error_t {
-	not_null!(_buf, _buf_written);
-	
-	error_t::enotfound().set_desc(b"This plugin does not support multiple crypto items")
-}
-
-
-/// Seals `key` into `buf`
-///
-/// ## Algorithm
-/// 1. Create a secure random 16 byte KDF `salt` and a secure random 12 byte ChachaPoly `nonce`
-/// 2. Derive a ChachaPoly `aead_key` by using Blake2b as KDF with the `user_secret` as key and
-///    `salt` as salt
-/// 3. Seal `key` using ChachaPoly with `aead_key` as key and `nonce` as nonce
-///
-/// ## Format
-/// `salt[16] || nonce[12] || chacha_ciphertext* || poly_tag[16]`
-///
-/// (`||` denotes concatenation)
-#[no_mangle]
-pub extern "C" fn seal(buf: *mut u8, buf_written: *mut usize, key: *const u8, key_len: usize,
-	crypto_item_id: *const u8, _crypto_item_id_len: usize, user_secret: *const u8,
-	user_secret_len: usize) -> *const error_t
-{
-	not_null!(buf, buf_written, key);
-	
-	// Create slices
-	match crypto_item_id.is_null() {
-		true => (),
-		false => return error_t::einval(4).set_desc(b"Invalid crypto item")
-	};
-	let user_secret = match user_secret.is_null() {
-		true => return error_t::eperm(true).set_desc(b"Missing user secret"),
-		false => match user_secret_len {
-			1..=64 => unsafe{ slice::from_raw_parts(user_secret, user_secret_len) },
-			_ => return error_t::einval(6).set_desc(b"Unsupported user secret length")
-		}
-	};
-	let key = unsafe{ slice::from_raw_parts(key, key_len) };
-	let buf = unsafe{ slice::from_raw_parts_mut(buf, key_len + OVERHEAD) };
-	
-	
-	// Create a salt, nonce and derive the key
-	let (salt, buf) = buf.split_off_mut(SALT_LEN);
-	ensure!(OsRandom::secure_rng().random(salt).is_ok());
-	
-	let (nonce, buf) = buf.split_off_mut(NONCE_LEN);
-	ensure!(OsRandom::secure_rng().random(nonce).is_ok());
-	
-	let mut aead_key = vec![0; 32];
-	ensure!(Blake2b::kdf().derive(&mut aead_key, user_secret, salt, b"").is_ok());
-	
-	
-	// Encrypt the key
-	ensure!(ChachaPolyIetf::aead_cipher().seal_to(buf, key, b"", &aead_key, nonce).is_ok());
-	unsafe{ *buf_written = key_len + OVERHEAD }
-	error_t::ok()
-}
-
-
-/// Opens `capsule` into `buf`
-///
-/// ## Algorithm
-/// 1. Create a secure random 16 byte KDF `salt` and a secure random 12 byte ChachaPoly `nonce`
-/// 2. Derive a ChachaPoly `aead_key` by using Blake2b as KDF with the `user_secret` as key and
-///    `salt` as salt
-/// 3. Seal `key` using ChachaPoly with `aead_key` as key and `nonce` as nonce
-///
-/// ## Format
-/// `salt[16] || nonce[12] || chacha_ciphertext* || poly_tag[16]`
-///
-/// (`||` denotes concatenation)
-#[no_mangle]
-pub extern "C" fn open(buf: *mut u8, buf_written: *mut usize, capsule: *const u8,
-	capsule_len: usize, user_secret: *const u8, user_secret_len: usize) -> *const error_t
-{
-	not_null!(buf, buf_written, capsule);
-	
-	// Create slices
-	let capsule = match capsule_len >= OVERHEAD {
-		true => unsafe{ slice::from_raw_parts(capsule, capsule_len) },
-		false => return error_t::eilseq().set_desc(b"Truncated capsule")
-	};
-	let user_secret = match user_secret.is_null() {
-		true => return error_t::eperm(true).set_desc(b"Missing user secret"),
-		false => match user_secret_len {
-			1..=64 => unsafe{ slice::from_raw_parts(user_secret, user_secret_len) },
-			_ => return error_t::einval(6).set_desc(b"Unsupported user secret length")
-		}
-	};
-	let buf = unsafe{ slice::from_raw_parts_mut(buf, capsule_len) };
-	
-	
-	// Derive key
-	let (salt, capsule) = capsule.split_off(SALT_LEN);
-	let (nonce, ciphertext) = capsule.split_off(NONCE_LEN);
-	
-	let mut aead_key = vec![0; 32];
-	ensure!(Blake2b::kdf().derive(&mut aead_key, user_secret, salt, b"").is_ok());
-	
-	
-	// Decrypt the capsule
-	match ChachaPolyIetf::aead_cipher().open_to(buf, ciphertext, b"", &aead_key, nonce) {
-		Ok(_) => {
-			unsafe{ *buf_written = capsule_len - OVERHEAD }
-			error_t::ok()
-		}
-		Err(e) => {
-			eprintln!("{}", e);
-			error_t::eilseq().set_desc(b"Invalid capsule")
-		}
+/// Logs some text
+#[allow(unused)]
+fn log(s: impl AsRef<str>) {
+	if LOG_LEVEL.load(SeqCst) > 0 {
+		eprintln!("{}", s.as_ref())
 	}
+}
+
+/// Converts a `Result<(), *const c_char>>` to a nullable error pointer
+fn try_catch(f: impl FnOnce() -> Result<(), *const c_char>) -> *const c_char {
+	f().err().unwrap_or(ptr::null())
+}
+
+
+/// Initializes the library with a specific API version and a logging level
+///
+/// Returns `NULL` on success or a pointer to a static error description
+#[no_mangle]
+pub extern "C" fn init(api: u16, log_level: u8) -> *const c_char {
+	LOG_LEVEL.store(log_level, SeqCst);
+	match api {
+		API => ptr::null(),
+		_ => ERR_INVALID_API
+	}
+}
+
+
+/// Queries the plugin/format ID
+///
+/// Returns `NULL` on success or a pointer to a static error description
+#[no_mangle]
+pub extern "C" fn id(sink: *mut sys::write_t) -> *const c_char {
+	try_catch(|| sink.checked_write(UID))
+}
+
+
+/// Queries all possible configs and writes them as separate segments
+///
+/// Returns `NULL` on success or a pointer to a static error description
+#[no_mangle]
+pub extern "C" fn configs(sink: *mut sys::write_t) -> *const c_char {
+	try_catch(|| sink.checked_write(CONFIG_BLAKE2B_CHACHAPOLY_IETF))
+}
+
+
+/// Sets an optional application specific context if supported (useful to name the keys better etc.)
+///
+/// Returns `NULL` on success/if unsupported or a pointer to a static error description if a context
+/// is supported by the plugin but could not be set
+#[no_mangle]
+pub extern "C" fn set_context(_context: *const sys::slice_t) -> *const c_char {
+	ptr::null()
+}
+
+
+/// Queries the authentication requirements to protect a secret for a specific config
+///
+/// Returns `NULL` on success or a pointer to a static error description
+#[no_mangle]
+extern "C" fn auth_info_protect(is_required: *mut u8, retries: *mut u64,
+	config: *const sys::slice_t) -> *const c_char
+{
+	try_catch(|| {
+		// Validate the passed config
+		if config.checked_slice()? != CONFIG_BLAKE2B_CHACHAPOLY_IETF {
+			Err(ERR_INVALID_CONFIG)?
+		}
+		
+		// Set info
+		is_required.checked_set(1)?;
+		retries.checked_set(u64::max_value())?;
+		Ok(())
+	})
+}
+
+
+/// Queries the authentication requirements to recover a secret for a specific config
+///
+/// Returns `NULL` on success or a pointer to a static error description
+#[no_mangle]
+extern "C" fn auth_info_recover(is_required: *mut u8, retries: *mut u64,
+	config: *const sys::slice_t) -> *const c_char
+{
+	try_catch(|| {
+		// Validate the passed config
+		if config.checked_slice()? != CONFIG_BLAKE2B_CHACHAPOLY_IETF {
+			Err(ERR_INVALID_CONFIG)?
+		}
+		
+		// Set info
+		is_required.checked_set(1)?;
+		retries.checked_set(u64::max_value())?;
+		Ok(())
+	})
+}
+
+
+/// Protects some data
+///
+/// ## Algorithm
+/// 1. Create a secure random 16 byte KDF `salt` and a secure random 12 byte ChachaPoly `nonce`
+/// 2. Derive a ChachaPoly `aead_key` by using Blake2b as KDF with the `user_secret` as key and
+///    `salt` as salt
+/// 3. Seal `key` using ChachaPoly with `aead_key` as key and `nonce` as nonce
+///
+/// ## Format
+/// `salt[16] || nonce[12] || chacha_ciphertext* || poly_tag[16]`
+///
+/// (`||` denotes concatenation)
+#[no_mangle]
+extern "C" fn protect(sink: *mut sys::write_t, data: *const sys::slice_t,
+	config: *const sys::slice_t, auth: *const sys::slice_t) -> *const c_char
+{
+	try_catch(|| {
+		// Validate the passed config
+		if config.checked_slice()? != CONFIG_BLAKE2B_CHACHAPOLY_IETF {
+			Err(ERR_INVALID_CONFIG)?
+		}
+		
+		// Protect the key
+		let auth = auth.checked_slice().map_err(|_| ERR_MISSING_AUTH)?;
+		let protected = crypto::protect(auth, data.checked_slice()?)?;
+		Ok(sink.checked_write(&protected)?)
+	})
+}
+
+
+/// Recovers some data
+///
+/// Returns `NULL` on success or a pointer to a static error description
+#[no_mangle]
+extern "C" fn recover(sink: *mut sys::write_t, data: *const sys::slice_t, auth: *const sys::slice_t)
+	-> *const c_char
+{
+	try_catch(|| {
+		// Recover the key
+		let auth = auth.checked_slice().map_err(|_| ERR_MISSING_AUTH)?;
+		let recovered = crypto::recover(auth, data.checked_slice()?)?;
+		Ok(sink.checked_write(&recovered)?)
+	})
+}
+
+
+/// Test the function signatures
+#[test]
+fn test_types() {
+	struct Fns {
+		_init: sys::init,
+		_id: sys::id,
+		_configs: sys::configs,
+		_set_context: sys::set_context,
+		_auth_info_protect: sys::auth_info_protect,
+		_auth_info_recover: sys::auth_info_recover,
+		_protect: sys::protect,
+		_recover: sys::recover
+	}
+	let _fns = Fns {
+		_init: Some(init),
+		_id: Some(id),
+		_configs: Some(configs),
+		_set_context: Some(set_context),
+		_auth_info_protect: Some(auth_info_protect),
+		_auth_info_recover: Some(auth_info_recover),
+		_protect: Some(protect),
+		_recover: Some(recover)
+	};
 }
